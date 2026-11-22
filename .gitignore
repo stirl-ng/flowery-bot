@@ -9,7 +9,7 @@ voicelines/clean/
 voicelines/catalog.json
 
 # Voice clone: reference audio built from the game clips, and generated lines
-voicelines/reference.wav
+voicelines/reference*.wav
 voicelines/generated/
 tts/.venv/
 __pycache__/

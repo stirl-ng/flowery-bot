@@ -146,10 +146,20 @@ npm run say -- "Leaf it to me, guys!"
 This writes `voicelines/generated/leaf-it-to-me-guys.wav`. Add `--crunch` to bitcrush it like the game, or `--out file.wav` to choose the path.
 
 **How it works.**
-- **Voice reference.** [tts/server.py](tts/server.py) joins four clear clips (about 10 s) from `voicelines/clean/` into `voicelines/reference.wav` and passes their exact transcript with it. To change the voice, edit `REFERENCE` at the top of that file. F5-TTS works best with 5–12 s of reference audio.
+- **Voice reference.** [tts/server.py](tts/server.py) trims the silence off a set of clear clips from `voicelines/clean/` and joins them (about 11 s) into `voicelines/reference-<set>.wav`, passing their exact transcript along with it. F5-TTS copies the reference's pacing and stress, and it sets each line's length from the reference's seconds per character, so leftover silence makes every line slow and slurred. `TTS_REFERENCE` picks the set:
+
+  | `TTS_REFERENCE` | Clones from |
+  |---|---|
+  | `auto` (default) | `exuberant` for lines with "!", `mixed` for the rest |
+  | `mixed` | Chatty and excited lines in one reference: "Hey guys, I think I found a glue", "Here I come, San Frandisco!", "Heh, it's my Jarona!" |
+  | `exuberant` | Excited lines: "Here I come, San Frandisco!", "Don't you like serving humans?", "Leaf it to me!" |
+  | `conversational` | Only everyday lines: "Sorry about that, little guy", "Your dad's my best friend" |
+  | `smug` | "It's me, Flowery", "What a predictable creature" |
+
+  To add a set, edit `REFERENCE_SETS` in that file and keep it under 12 s.
 - **Fallback.** If the server is down or too slow (`TTS_TIMEOUT_MS`), or the LLM fails, the reply falls back to the `CLIP_PICKER` clip choice, and then to a random clip. Triggers don't change and always play game clips.
 - **Bitcrush.** `TTS_CRUNCH=true` applies the game's 22.05 kHz bitcrush to generated lines so they match `voicelines/original`. It's on by default when the bot plays those originals.
-- **Tuning.** `TTS_SPEED` sets the speaking rate. `TTS_NFE_STEPS` trades quality for speed: the default is 32, and 16 is about twice as fast.
+- **Tuning.** `TTS_SPEED` sets the speaking rate. `TTS_NFE_STEPS` trades quality for speed: the default is 32, 64 is a little cleaner and about twice as slow, and 16 is twice as fast. `TTS_CFG` (default 2.0) sets how strictly it follows the text: around 2.5 gives crisper words with a flatter delivery.
 
 **Rights.** The cloned voice comes from Toby Fox's copyrighted game audio and a real performer's voice, so keep it on your own server. `voicelines/reference.wav` and `voicelines/generated/` are gitignored, like the clips.
 

@@ -7,14 +7,17 @@
   One-off line to a file:     npm run say -- "Leaf it to me, guys!" [--out file.wav] [--crunch]
       Writes to voicelines/generated/<slug>.wav by default.
 
-The voice reference is a few clean clips from voicelines/clean joined together
-(F5-TTS works best with 5-12 s of reference audio plus its exact transcript).
-It is rebuilt at startup, so editing REFERENCE below is all it takes to change it.
+The voice reference is a few clean clips from voicelines/clean, trimmed of
+silence and joined (F5-TTS works best with 5-12 s of reference audio plus its
+exact transcript). It is rebuilt at startup from REFERENCE_SETS below.
 
 Settings come from the environment (and ../.env, if present):
   TTS_HOST / TTS_PORT   where the server listens (default 127.0.0.1:5005)
+  TTS_REFERENCE         which REFERENCE_SETS entry to clone from, or auto (the default):
+                        exuberant for lines with "!", mixed for the rest
   TTS_SPEED             speaking rate, 1.0 = normal
   TTS_NFE_STEPS         diffusion steps: fewer is faster, more is cleaner (default 32)
+  TTS_CFG               how closely to follow the text: higher = crisper words, less natural (default 2.0)
   TTS_DEVICE            cuda / cpu (default: cuda if available)
   VOICELINES_DIR        where the clean clips live (default voicelines/clean)
 """
@@ -39,16 +42,64 @@ import torchaudio.functional as AF
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Clips joined into the voice reference, with what Flowery says in each.
-# Chosen for clear delivery and little background sound; about 10 s in total.
+# Clip sets for the voice reference, with exactly what Flowery says in each.
+# F5-TTS copies the reference's pacing and stress, so prefer natural sentences
+# over shouts and one-word lines, and keep the total speech under ~11 s (it cuts at 12).
 # The last line must end in a period, or F5-TTS tacks on an extra ". ".
-REFERENCE = [
-    ("its-me-flowery", "It's me, Flowery."),
-    ("dont-you-like-serving-humans", "Don't you like serving humans?"),
-    ("im-only-trying-to-help-you", "I'm only trying to help you."),
-    ("what-a-predictable-creature", "What a predictable creature."),
-]
-GAP_SECONDS = 0.3
+# Pick one with TTS_REFERENCE, or "auto" to choose per line (see Voice.reference_for).
+REFERENCE_SETS = {
+    # Everyday chatty lines: the closest match to how the bot talks.
+    "conversational": [
+        ("hey-guys-i-think-i-found-a-glue", "Hey guys, I think I found a glue."),
+        ("your-dads-my-best-friend", "Your dad's my best friend."),
+        ("sorry-about-that-little-guy", "Sorry about that, little guy."),
+        ("its-so-human", "Heh, it's so human."),
+        ("im-only-trying-to-help-you", "I'm only trying to help you."),
+        ("what-a-predictable-creature", "What a predictable creature."),
+    ],
+    # Big, showy battle-cry energy.
+    "exuberant": [
+        ("here-i-come-san-frandisco", "Here I come, San Frandisco!"),
+        ("heh-its-my-jarona", "Heh, it's my Jarona!"),
+        ("dont-you-like-serving-humans", "Don't you like serving humans?"),
+        ("one-more-for-the-fans", "And one more for the fans!"),
+        ("leaf-it-to-me", "Leaf it to me!"),
+        ("huh-ill-show-you", "Huh, I'll show you."),
+    ],
+    # Chatty and showy in one reference: the default for ordinary lines.
+    "mixed": [
+        ("here-i-come-san-frandisco", "Here I come, San Frandisco!"),
+        ("hey-guys-i-think-i-found-a-glue", "Hey guys, I think I found a glue."),
+        ("heh-its-my-jarona", "Heh, it's my Jarona!"),
+        ("dont-you-like-serving-humans", "Don't you like serving humans?"),
+        ("im-only-trying-to-help-you", "I'm only trying to help you."),
+    ],
+    # Smug and scheming.
+    "smug": [
+        ("its-me-flowery", "It's me, Flowery."),
+        ("dont-you-like-serving-humans", "Don't you like serving humans?"),
+        ("im-only-trying-to-help-you", "I'm only trying to help you."),
+        ("what-a-predictable-creature", "What a predictable creature."),
+    ],
+}
+GAP_SECONDS = 0.15
+# Frames quieter than this (dB below the clip's loudest 10 ms) count as silence when trimming.
+SILENCE_DB = 35
+EDGE_PAD_SECONDS = 0.03
+
+
+def trim_silence(audio: np.ndarray, sr: int) -> np.ndarray:
+    """Cuts leading and trailing silence (and reverb tails) off a clip.
+    F5-TTS sets a line's length from the reference's seconds per character, so
+    silence in the reference makes every generated line slow and smeared."""
+    hop = max(1, int(sr * 0.01))
+    frames = audio[: len(audio) // hop * hop].reshape(-1, hop)
+    db = 20 * np.log10(np.sqrt((frames**2).mean(axis=1)) + 1e-9)
+    loud = np.flatnonzero(db > db.max() - SILENCE_DB)
+    if loud.size == 0:
+        return audio
+    pad = int(sr * EDGE_PAD_SECONDS)
+    return audio[max(0, loud[0] * hop - pad) : min(len(audio), (loud[-1] + 1) * hop + pad)]
 
 
 def load_dotenv() -> None:
@@ -76,11 +127,14 @@ def load_with_soundfile(path, *_, **__) -> tuple[torch.Tensor, int]:
     return torch.from_numpy(audio.T.copy()), sr
 
 
-def build_reference(clips_dir: Path, out: Path) -> str:
-    """Joins the REFERENCE clips into one mono wav and returns its transcript."""
+def build_reference(clips_dir: Path, out: Path, name: str, trim: bool = True) -> str:
+    """Joins a REFERENCE_SETS entry into one mono wav and returns its transcript."""
+    if name not in REFERENCE_SETS:
+        sys.exit(f"Unknown TTS_REFERENCE {name!r}; choose auto or one of: {', '.join(REFERENCE_SETS)}")
+    clips = REFERENCE_SETS[name]
     parts: list[np.ndarray] = []
     rate = None
-    for clip_id, _ in REFERENCE:
+    for clip_id, _ in clips:
         path = clips_dir / f"{clip_id}.wav"
         if not path.exists():
             sys.exit(f"Missing {path}. Run `npm run download-voicelines` first.")
@@ -90,12 +144,16 @@ def build_reference(clips_dir: Path, out: Path) -> str:
             rate = sr
         elif sr != rate:
             audio = AF.resample(torch.from_numpy(audio), sr, rate).numpy()
+        if trim:
+            audio = trim_silence(audio, rate)
         if parts:
-            parts.append(np.zeros(int(rate * GAP_SECONDS), dtype=np.float32))
+            parts.append(np.zeros(int(rate * (GAP_SECONDS if trim else 0.3)), dtype=np.float32))
         parts.append(audio)
     out.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(out, np.concatenate(parts), rate)
-    return " ".join(text for _, text in REFERENCE)  # F5-TTS adds the trailing space itself
+    joined = np.concatenate(parts)
+    sf.write(out, joined, rate)
+    print(f"Voice reference {name!r}: {len(joined) / rate:.1f}s from {len(clips)} clips", flush=True)
+    return " ".join(text for _, text in clips)  # F5-TTS adds the trailing space itself
 
 
 def crunch(audio: np.ndarray, sr: int) -> tuple[np.ndarray, int]:
@@ -112,26 +170,49 @@ class Voice:
 
         torchaudio.load = load_with_soundfile
 
-        clips_dir = ROOT / os.environ.get("VOICELINES_DIR", "voicelines/clean")
-        if clips_dir.name == "original":
-            clips_dir = clips_dir.with_name("clean")  # always clone from the clean copies
-        self.ref_file = ROOT / "voicelines" / "reference.wav"
-        self.ref_text = build_reference(clips_dir, self.ref_file)
+        self.clips_dir = ROOT / os.environ.get("VOICELINES_DIR", "voicelines/clean")
+        if self.clips_dir.name == "original":
+            self.clips_dir = self.clips_dir.with_name("clean")  # always clone from the clean copies
         self.speed = float(os.environ.get("TTS_SPEED", "1.0"))
         self.nfe_steps = int(os.environ.get("TTS_NFE_STEPS", "32"))
+        self.cfg_strength = float(os.environ.get("TTS_CFG", "2.0"))
+        self.refs: dict[tuple[str, bool], tuple[Path, str]] = {}
+        self.set_reference(os.environ.get("TTS_REFERENCE", "auto"))
         device = os.environ.get("TTS_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Loading F5-TTS on {device}…", flush=True)
         self.model = F5TTS(device=device)
         self.lock = threading.Lock()  # one generation at a time on the GPU
 
-    def say(self, text: str, crunched: bool = False) -> tuple[np.ndarray, int]:
+    def set_reference(self, mode: str, trim: bool = True) -> None:
+        """Chooses a REFERENCE_SETS entry, or "auto", and builds the reference audio it needs."""
+        self.mode, self.trim = mode, trim
+        for name in ("mixed", "exuberant") if mode == "auto" else (mode,):
+            self.reference(name)
+
+    def reference(self, name: str) -> tuple[Path, str]:
+        key = (name, self.trim)
+        if key not in self.refs:
+            out = ROOT / "voicelines" / f"reference-{name}{'' if self.trim else '-untrimmed'}.wav"
+            self.refs[key] = (out, build_reference(self.clips_dir, out, name, self.trim))
+        return self.refs[key]
+
+    def reference_for(self, text: str) -> str:
+        """In auto mode, excited lines (any "!") get the exuberant voice, the rest the mixed one."""
+        if self.mode != "auto":
+            return self.mode
+        return "exuberant" if "!" in text else "mixed"
+
+    def say(self, text: str, crunched: bool = False, seed: int | None = None) -> tuple[np.ndarray, int]:
         with self.lock:
+            ref_file, ref_text = self.reference(self.reference_for(text))
             audio, sr, _ = self.model.infer(
-                ref_file=str(self.ref_file),
-                ref_text=self.ref_text,
+                ref_file=str(ref_file),
+                ref_text=ref_text,
                 gen_text=text,
                 speed=self.speed,
                 nfe_step=self.nfe_steps,
+                cfg_strength=self.cfg_strength,
+                seed=seed,
                 show_info=lambda *_: None,
                 progress=None,
             )
@@ -168,7 +249,7 @@ def serve(voice: Voice) -> None:
             except Exception as err:  # report to the bot, which falls back to clips
                 print(f"generation failed: {err}", flush=True)
                 return self.reply(500, "text/plain", str(err).encode())
-            print(f"{(time.time() - started) * 1000:.0f}ms  {text!r}", flush=True)
+            print(f"{(time.time() - started) * 1000:.0f}ms  [{voice.reference_for(text)}] {text!r}", flush=True)
             self.reply(200, "audio/wav", wav_bytes(audio, sr))
 
         def reply(self, status: int, ctype: str, data: bytes) -> None:
