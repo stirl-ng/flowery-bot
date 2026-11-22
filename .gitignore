@@ -1,0 +1,9 @@
+node_modules/
+models/
+.env
+*.log
+
+# Game audio: copyrighted, re-download with `npm run download-voicelines`
+voicelines/original/
+voicelines/clean/
+voicelines/catalog.json
