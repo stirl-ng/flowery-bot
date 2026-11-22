@@ -1,0 +1,28 @@
+[project]
+name = "flowery-tts"
+version = "0.1.0"
+description = "Local F5-TTS server that speaks new lines in Flowery's voice"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+  "f5-tts>=1.1",
+  "torch",
+  "torchaudio",
+  "numpy",
+  # f5-tts pulls in numpy 1.x; newer pyarrow (via datasets) needs numpy 2.
+  "pyarrow<20",
+  "soundfile",
+]
+
+# CUDA build of PyTorch. For a CPU-only machine, delete these two sections
+# (it works, just slowly: several seconds per line).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchaudio = [{ index = "pytorch-cu128" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv]
+package = false

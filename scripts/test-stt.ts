@@ -10,7 +10,7 @@ import sherpa from 'sherpa-onnx-node';
 import { discordPcmToStt } from '../src/audio.ts';
 import { loadCatalog } from '../src/catalog.ts';
 import { config } from '../src/config.ts';
-import { createPicker, RandomPicker } from '../src/picker.ts';
+import { createReplyPicker, RandomPicker } from '../src/picker.ts';
 import { Responder } from '../src/responder.ts';
 import { STT_SAMPLE_RATE, Transcriber } from '../src/stt.ts';
 import { loadTriggers } from '../src/triggers.ts';
@@ -32,7 +32,7 @@ const responder = new Responder({
   wakeWords: config.wakeWords,
   threshold: config.wakeWordThreshold,
   maxClips: config.maxClips,
-  picker: useLlm ? createPicker(config, catalog, random) : random,
+  picker: useLlm ? createReplyPicker(config, catalog, random) : random,
   fallback: random,
 });
 

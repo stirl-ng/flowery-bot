@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import type { Clip } from './catalog.ts';
+import { ClaudeWriter, GeminiWriter, TtsClient, VoicePicker, type LineWriter } from './voice.ts';
 
 export interface PickRequest {
   speaker: string;
@@ -124,6 +125,38 @@ export class GeminiPicker implements ClipPicker {
       .map((id) => this.clips.get(String(id)))
       .filter((c): c is Clip => !!c);
   }
+}
+
+/**
+ * Builds what answers "Flowery, ___". With REPLY_MODE=voice that is a VoicePicker
+ * (new line, spoken by F5-TTS) that falls back to the clip picker; otherwise the clip picker.
+ */
+export function createReplyPicker(
+  cfg: Parameters<typeof createPicker>[0] & { replyMode: string; ttsUrl: string; ttsCrunch: boolean; ttsTimeoutMs: number },
+  catalog: Map<string, Clip>,
+  random: ClipPicker,
+): ClipPicker {
+  const clipPicker = createPicker(cfg, catalog, random);
+  if (cfg.replyMode !== 'voice') {
+    if (cfg.replyMode !== 'clips') console.warn(`Unknown REPLY_MODE "${cfg.replyMode}" (use clips or voice) — using clips.`);
+    return clipPicker;
+  }
+  const clips = [...catalog.values()];
+  let writer: LineWriter | undefined;
+  if (cfg.clipPicker === 'gemini' && cfg.geminiApiKey) {
+    writer = new GeminiWriter(clips, { apiKey: cfg.geminiApiKey, model: cfg.geminiModel });
+  } else if (cfg.clipPicker === 'claude' && (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN)) {
+    writer = new ClaudeWriter(clips, { model: cfg.claudeModel, effort: cfg.claudeEffort });
+  }
+  if (!writer) {
+    console.warn('REPLY_MODE=voice needs an LLM to write lines: set CLIP_PICKER to gemini or claude with its API key. Using clips.');
+    return clipPicker;
+  }
+  const tts = new TtsClient({ url: cfg.ttsUrl, crunch: cfg.ttsCrunch, timeoutMs: cfg.ttsTimeoutMs });
+  void tts.healthy().then((ok) => {
+    if (!ok) console.warn(`TTS server not reachable at ${cfg.ttsUrl} — start it with \`npm run tts\`. Until then replies use clips.`);
+  });
+  return new VoicePicker(writer, tts, clipPicker);
 }
 
 /** Builds the picker named by CLIP_PICKER, or falls back to random (with a warning) if its key is missing. */

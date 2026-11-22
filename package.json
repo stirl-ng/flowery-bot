@@ -9,7 +9,10 @@
     "test": "node --import tsx --test src/**/*.test.ts",
     "download-model": "node scripts/download-model.mjs",
     "test-stt": "tsx scripts/test-stt.ts",
-    "download-voicelines": "node scripts/download-voicelines.mjs"
+    "download-voicelines": "node scripts/download-voicelines.mjs",
+    "tts": "uv run --project tts python -W ignore tts/server.py",
+    "say": "uv run --project tts python -W ignore tts/server.py --say",
+    "setup-tts": "uv sync --project tts"
   },
   "license": "UNLICENSED",
   "dependencies": {

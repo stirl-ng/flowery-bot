@@ -42,6 +42,14 @@ export const config = {
   geminiModel: process.env.GEMINI_MODEL?.trim() || 'gemini-flash-lite-latest',
   /** Most clips the LLM may chain into one reply. */
   maxClips: num('MAX_CLIPS', 3),
+  /** After the wake word: "clips" = pick game clips, "voice" = write a new line and speak it with F5-TTS. */
+  replyMode: (process.env.REPLY_MODE ?? 'clips').trim().toLowerCase(),
+  /** Where `npm run tts` (tts/server.py) listens. */
+  ttsUrl: (process.env.TTS_URL?.trim() || `http://127.0.0.1:${process.env.TTS_PORT?.trim() || 5005}`).replace(/\/$/, ''),
+  /** Bitcrush generated lines like the game clips. Defaults to on when playing the bitcrushed originals. */
+  ttsCrunch: bool('TTS_CRUNCH', /[\\/]original$/.test(process.env.VOICELINES_DIR ?? '')),
+  /** Give up on a generated line after this long and play a game clip instead. */
+  ttsTimeoutMs: num('TTS_TIMEOUT_MS', 8000),
   modelDir: path.resolve(
     process.env.MODEL_DIR ?? 'models/sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8',
   ),

@@ -117,25 +117,54 @@ To use the in-game crunchy versions instead, set `VOICELINES_DIR=voicelines/orig
 
 Both folders are gitignored. The clips are Toby Fox's copyrighted game audio, so keep them out of public repos and re-download them on each machine instead.
 
-## Adding AI-generated audio later
+## New lines in Flowery's voice (F5-TTS)
 
-A reply is a list of `Clip`s ([src/catalog.ts](src/catalog.ts)), and the session plays each clip's `file` in order. To make replies generative:
+Besides the game clips, Flowery can say new lines. With `REPLY_MODE=voice`, the `CLIP_PICKER` LLM (Gemini or Claude) writes a short reply in his style. [F5-TTS](https://github.com/SWivid/F5-TTS), running on your own GPU, then speaks it in a voice cloned from his clips. On an RTX 4090 a whole reply, writing and speaking, takes about 1.5 s.
 
-1. Add a `ClipPicker` ([src/picker.ts](src/picker.ts)) that asks the LLM to write a reply in Flowery's voice instead of choosing ids.
-2. Send that text to a TTS or voice-clone API, save the audio to a temporary file, and return it as a `Clip`.
-3. Return it from `createPicker` in [src/picker.ts](src/picker.ts).
+```
+"Flowery, ___" ─► LLM writes a line ─► tts/server.py (F5-TTS) ─► temp .wav ─► play
+```
 
-Triggers keep working unchanged, and the random picker remains the fallback if the API is slow or fails.
+**Setup.** You need [uv](https://docs.astral.sh/uv/) and, for usable speed, an NVIDIA GPU. The first run downloads about 1.5 GB of model weights from Hugging Face.
+
+```powershell
+npm run setup-tts
+```
+
+Then set `REPLY_MODE=voice` in `.env` and keep the TTS server running next to the bot:
+
+```powershell
+npm run tts
+```
+
+**Making clips by hand.** You can also generate a specific line yourself, for example to put it in `voicelines/clean/` and give it a trigger:
+
+```powershell
+npm run say -- "Leaf it to me, guys!"
+```
+
+This writes `voicelines/generated/leaf-it-to-me-guys.wav`. Add `--crunch` to bitcrush it like the game, or `--out file.wav` to choose the path.
+
+**How it works.**
+- **Voice reference.** [tts/server.py](tts/server.py) joins four clear clips (about 10 s) from `voicelines/clean/` into `voicelines/reference.wav` and passes their exact transcript with it. To change the voice, edit `REFERENCE` at the top of that file. F5-TTS works best with 5–12 s of reference audio.
+- **Fallback.** If the server is down or too slow (`TTS_TIMEOUT_MS`), or the LLM fails, the reply falls back to the `CLIP_PICKER` clip choice, and then to a random clip. Triggers don't change and always play game clips.
+- **Bitcrush.** `TTS_CRUNCH=true` applies the game's 22.05 kHz bitcrush to generated lines so they match `voicelines/original`. It's on by default when the bot plays those originals.
+- **Tuning.** `TTS_SPEED` sets the speaking rate. `TTS_NFE_STEPS` trades quality for speed: the default is 32, and 16 is about twice as fast.
+
+**Rights.** The cloned voice comes from Toby Fox's copyrighted game audio and a real performer's voice, so keep it on your own server. `voicelines/reference.wav` and `voicelines/generated/` are gitignored, like the clips.
 
 ## Development
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | Run with auto-restart on file changes |
-| `npm test` | Unit tests for wake-word matching and reply routing |
+| `npm test` | Unit tests for wake-word matching, reply routing and the voice fallback |
 | `npm run typecheck` | TypeScript check |
 | `npm run download-voicelines` | Fetch clips from the wiki and generate the de-bitcrushed copies (skips files already present) |
 | `npm run test-stt -- clip.wav` | Show what a recording transcribes to and which clips it would play, without Discord. Add `--llm` to use the `CLIP_PICKER` model (makes API calls) |
+| `npm run setup-tts` | Install F5-TTS and CUDA PyTorch into `tts/.venv` (uses uv) |
+| `npm run tts` | Run the F5-TTS server the bot uses with `REPLY_MODE=voice` |
+| `npm run say -- "text"` | Speak one line in Flowery's voice into `voicelines/generated/` |
 
 ## Tuning and known limits
 

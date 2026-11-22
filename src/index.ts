@@ -10,7 +10,7 @@ import {
 import { generateDependencyReport } from '@discordjs/voice';
 import { loadCatalog } from './catalog.ts';
 import { config } from './config.ts';
-import { createPicker, RandomPicker } from './picker.ts';
+import { createReplyPicker, RandomPicker } from './picker.ts';
 import { Responder } from './responder.ts';
 import { VoiceSession } from './session.ts';
 import { Transcriber } from './stt.ts';
@@ -33,7 +33,7 @@ const transcriber = await Transcriber.load(config.modelDir);
 const catalog = loadCatalog(config.catalogFile, config.voicelinesDir);
 const triggers = loadTriggers(config.triggersFile, catalog);
 const randomPicker = new RandomPicker([...catalog.values()]);
-const picker = createPicker(config, catalog, randomPicker);
+const picker = createReplyPicker(config, catalog, randomPicker);
 const responder = new Responder({
   catalog,
   triggers,
